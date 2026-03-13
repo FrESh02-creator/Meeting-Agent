@@ -35,6 +35,11 @@ Domain context:
 - Experiment assistant system
 - TianGong large-model API integration
 
+Input transcript may include speaker-tagged lines like:
+[Speaker 1]: ...
+[Speaker 2]: ...
+Treat speaker tags as dialogue metadata. Use them to infer responsibility and context, but do not copy them into task names.
+
 Output JSON only. No markdown. No extra text.
 """.strip()
 
@@ -48,6 +53,7 @@ Checklist:
 1) Missing action items (especially casual commitments near the end)
 2) Owner assignment correctness and ambiguity
 3) Deadline reasonableness
+4) Speaker-tagged dialogue lines may appear as [Speaker N]: ... ; review content semantically rather than treating the tags as part of the sentence
 
 Return strict JSON:
 {

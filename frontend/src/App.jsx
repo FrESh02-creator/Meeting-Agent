@@ -82,6 +82,70 @@ const splitTranscriptParagraphs = (text) => {
     .filter(Boolean);
 };
 
+const speakerPalette = [
+  {
+    badge: "bg-blue-100 text-blue-700",
+    card: "border-blue-100 bg-blue-50/30",
+  },
+  {
+    badge: "bg-emerald-100 text-emerald-700",
+    card: "border-emerald-100 bg-emerald-50/30",
+  },
+  {
+    badge: "bg-amber-100 text-amber-700",
+    card: "border-amber-100 bg-amber-50/30",
+  },
+  {
+    badge: "bg-rose-100 text-rose-700",
+    card: "border-rose-100 bg-rose-50/30",
+  },
+];
+
+const normalizeSpeakerLabel = (speaker) => {
+  const raw = String(speaker || "").trim();
+  if (!raw) return "发言人 1";
+
+  const match = raw.match(/speaker\s*(\d+)/i);
+  if (match) return `发言人 ${match[1]}`;
+
+  return raw;
+};
+
+const parseSpeakerTranscript = (text) => {
+  const lines = String(text || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const turns = [];
+  const speakerRegex = /^\[(.+?)\]:\s*(.*)$/;
+
+  for (const line of lines) {
+    const matched = line.match(speakerRegex);
+    if (matched) {
+      turns.push({
+        speaker: normalizeSpeakerLabel(matched[1]),
+        text: matched[2].trim(),
+      });
+      continue;
+    }
+
+    if (turns.length > 0) {
+      turns[turns.length - 1].text = `${turns[turns.length - 1].text}\n${line}`.trim();
+    }
+  }
+
+  if (turns.length > 0) {
+    return turns.map((turn, index) => ({ ...turn, index }));
+  }
+
+  return splitTranscriptParagraphs(text).map((paragraph, index) => ({
+    speaker: "发言人 1",
+    text: paragraph,
+    index,
+  }));
+};
+
 const App = () => {
   const fileInputRef = useRef(null);
   const audioInputRef = useRef(null);
@@ -309,7 +373,7 @@ const App = () => {
     }
   };
 
-  const transcriptParagraphs = splitTranscriptParagraphs(voiceTranscript);
+  const speakerTurns = parseSpeakerTranscript(voiceTranscript);
 
   const renderAnalysisPreview = () => {
     if (!extractedData) {
@@ -763,17 +827,25 @@ const App = () => {
                     </div>
                   ) : voiceView === "transcript" ? (
                     <div className="space-y-6">
-                      {transcriptParagraphs.map((paragraph, index) => (
-                        <div key={`${paragraph}-${index}`} className="bg-white rounded-2xl border border-slate-200 px-5 py-4 shadow-sm">
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="inline-flex items-center justify-center h-8 px-3 rounded-xl bg-blue-100 text-blue-700 text-xs font-semibold">
-                              段落 {String(index + 1).padStart(2, "0")}
-                            </span>
-                            <span className="text-xs text-slate-400">{voiceTitle || "会议语音转写"}</span>
+                      {speakerTurns.map((turn) => {
+                        const palette = speakerPalette[turn.index % speakerPalette.length];
+                        const speakerShort = turn.speaker.replace("发言人 ", "");
+
+                        return (
+                          <div key={`${turn.speaker}-${turn.index}`} className={`rounded-[22px] border px-6 py-5 shadow-sm ${palette.card}`}>
+                            <div className="flex items-center gap-3 mb-4">
+                              <span className={`inline-flex items-center justify-center min-w-12 h-9 px-3 rounded-2xl text-xs font-semibold ${palette.badge}`}>
+                                {speakerShort}
+                              </span>
+                              <div className="flex items-center gap-3 text-sm">
+                                <span className="font-semibold text-slate-800">{turn.speaker}</span>
+                                <span className="text-slate-400">发言段 {String(turn.index + 1).padStart(2, "0")}</span>
+                              </div>
+                            </div>
+                            <p className="text-[15px] leading-9 text-slate-800 whitespace-pre-wrap">{turn.text}</p>
                           </div>
-                          <p className="text-base leading-8 text-slate-800 whitespace-pre-wrap">{paragraph}</p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-700 font-mono bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
