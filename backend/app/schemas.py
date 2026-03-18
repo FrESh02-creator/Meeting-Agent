@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+﻿from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,8 +58,18 @@ class AudioTranscriptResponse(BaseModel):
     file_name: str
     transcript_text: str
     markdown: str
+    history_id: Optional[int] = None
 
 
 class AudioTranscriptDownloadRequest(BaseModel):
     title: str = Field(min_length=1)
     transcript_text: str = Field(min_length=1)
+
+
+class MeetingHistoryItem(BaseModel):
+    id: int
+    title: str
+    date: str
+    entry_type: Literal["meeting_analysis", "audio_transcript"]
+    report_type: Optional[Literal["management", "project"]] = None
+    created_at: str
