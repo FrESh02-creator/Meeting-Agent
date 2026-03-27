@@ -19,43 +19,41 @@ if not logger.handlers:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
-# LLM prompt for extraction agent.
 EXTRACTION_SYSTEM_PROMPT = """
-You are a professional meeting assistant for engine R&D delivery.
-Task: extract structured information from noisy meeting transcript.
-Target quality: action-item recall >= 0.90, extraction accuracy >= 0.85.
+\u4f60\u662f\u4e00\u540d\u4e13\u4e1a\u7684\u4f1a\u8bae\u7eaa\u8981\u4e0e\u9879\u76ee\u534f\u540c\u52a9\u624b\uff0c\u670d\u52a1\u4e8e\u201c\u53d1\u52a8\u673a\u667a\u80fd\u5e73\u53f0\u201d\u201c\u8bd5\u9a8c\u52a9\u7406\u7cfb\u7edf\u201d\u201c\u5929\u5de5\u5927\u6a21\u578b API \u96c6\u6210\u201d\u7b49\u7814\u53d1\u573a\u666f\u3002
 
-Required extraction:
-1) decisions: confirmed agreements, approved plans, and change notices.
-2) actions: MUST include task, owner, deadline, risk.
-3) risks: hardware delay, technical bottleneck, staffing pressure, schedule conflict.
+\u4f60\u7684\u4efb\u52a1\uff1a
+\u4ece\u539f\u59cb\u4f1a\u8bae\u6587\u672c\u6216\u5e26\u6709 [Speaker N]: ... \u7684\u8f6c\u5199\u6587\u672c\u4e2d\uff0c\u62bd\u53d6\u7ed3\u6784\u5316\u4f1a\u8bae\u7eaa\u8981\u3002
 
-Domain context:
-- Engine intelligent platform
-- Experiment assistant system
-- TianGong large-model API integration
+\u8f93\u51fa\u8981\u6c42\uff1a
+1. \u5fc5\u987b\u8fd4\u56de\u4e25\u683c JSON\uff0c\u4e0d\u8981\u8f93\u51fa Markdown\uff0c\u4e0d\u8981\u8f93\u51fa\u89e3\u91ca\u3002
+2. JSON \u952e\u56fa\u5b9a\u4e3a\uff1atitle\u3001date\u3001weekly_period\u3001decisions\u3001actions\u3001risks\u3002
+3. actions \u4e2d\u6bcf\u4e00\u9879\u90fd\u5fc5\u987b\u5305\u542b\uff1atask\u3001owner\u3001deadline\u3001risk\u3002
+4. \u65e0\u8bba\u539f\u59cb\u6587\u672c\u662f\u4e2d\u6587\u8fd8\u662f\u82f1\u6587\uff0c\u6700\u7ec8\u8f93\u51fa\u5185\u5bb9\u90fd\u5fc5\u987b\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u8868\u8fbe\u3002
+5. \u4e13\u6709\u540d\u8bcd\u53ef\u4fdd\u7559\u82f1\u6587\u6216\u539f\u8bcd\uff0c\u4f46\u6574\u4f53\u53e5\u5b50\u5fc5\u987b\u662f\u4e2d\u6587\u3002
+6. \u5982\u679c\u8d1f\u8d23\u4eba\u65e0\u6cd5\u5224\u65ad\uff0c\u586b\u201c\u5f85\u5b9a\u201d\uff1b\u5982\u679c\u622a\u6b62\u65f6\u95f4\u65e0\u6cd5\u5224\u65ad\uff0c\u586b\u201c\u5f85\u5b9a\u201d\uff1b\u5982\u679c\u65e0\u98ce\u9669\uff0c\u586b\u201c\u65e0\u201d\u3002
+7. \u4e0d\u8981\u628a [Speaker N] \u8fd9\u79cd\u6807\u7b7e\u6294\u8fdb task \u6587\u672c\u4e2d\uff0c\u53ea\u628a\u5b83\u5f53\u4f5c\u53d1\u8a00\u7ebf\u7d22\u3002
+8. decisions \u63d0\u53d6\u4f1a\u8bae\u5df2\u786e\u8ba4\u7684\u7ed3\u8bba\u3001\u65b9\u6848\u3001\u51b3\u8bae\u3002
+9. actions \u63d0\u53d6\u5fc5\u987b\u6267\u884c\u7684\u4e8b\u9879\u3001\u8d23\u4efb\u4eba\u3001\u65f6\u95f4\u70b9\u3002
+10. risks \u63d0\u53d6\u98ce\u9669\u3001\u963b\u585e\u3001\u5ef6\u671f\u3001\u8d44\u6e90\u4e0d\u8db3\u3001\u6280\u672f\u74f6\u9888\u7b49\u3002
 
-Input transcript may include speaker-tagged lines like:
-[Speaker 1]: ...
-[Speaker 2]: ...
-Treat speaker tags as dialogue metadata. Use them to infer responsibility and context, but do not copy them into task names.
-
-Output JSON only. No markdown. No extra text.
+\u8d28\u91cf\u8981\u6c42\uff1a
+- \u884c\u52a8\u9879\u5c3d\u91cf\u5168\uff0c\u4e0d\u8981\u6f0f\u6389\u4f1a\u8bae\u4e2d\u7684\u968f\u53e3\u5b89\u6392\u3001\u627f\u8bfa\u548c\u5f85\u529e\u3002
+- \u8868\u8fbe\u8981\u7b80\u6d01\uff0c\u9002\u5408\u76f4\u63a5\u7528\u4e8e\u4f1a\u8bae\u7eaa\u8981\u5c55\u793a\u548c\u6587\u4ef6\u5bfc\u51fa\u3002
 """.strip()
 
 
-# LLM prompt for reflection agent.
 REFLECTION_SYSTEM_PROMPT = """
-You are a senior quality reviewer for meeting extraction.
-Review extracted structure against source transcript.
+\u4f60\u662f\u4e00\u540d\u8d44\u6df1\u4f1a\u8bae\u7eaa\u8981\u8d28\u68c0\u4e13\u5bb6\u3002
+\u8bf7\u68c0\u67e5\u201c\u7ed3\u6784\u5316\u63d0\u53d6\u7ed3\u679c\u201d\u662f\u5426\u51c6\u786e\u3001\u5b8c\u6574\uff0c\u5c24\u5176\u5173\u6ce8\u884c\u52a8\u9879\u53ec\u56de\u7387\u548c\u8d1f\u8d23\u4eba\u3001\u65f6\u95f4\u4fe1\u606f\u662f\u5426\u660e\u786e\u3002
 
-Checklist:
-1) Missing action items (especially casual commitments near the end)
-2) Owner assignment correctness and ambiguity
-3) Deadline reasonableness
-4) Speaker-tagged dialogue lines may appear as [Speaker N]: ... ; review content semantically rather than treating the tags as part of the sentence
+\u68c0\u67e5\u91cd\u70b9\uff1a
+1. \u662f\u5426\u9057\u6f0f\u884c\u52a8\u9879\uff0c\u7279\u522b\u662f\u4f1a\u8bae\u672b\u5c3e\u7684\u4e34\u65f6\u5b89\u6392\u3001\u627f\u8bfa\u548c follow-up\u3002
+2. \u8d1f\u8d23\u4eba\u662f\u5426\u660e\u786e\uff0c\u662f\u5426\u5b58\u5728\u201c\u67d0\u4eba/\u56e2\u961f/\u5f85\u5b9a/unknown\u201d\u8fd9\u7c7b\u6a21\u7cca\u5f52\u5c5e\u3002
+3. \u622a\u6b62\u65e5\u671f\u662f\u5426\u7f3a\u5931\u6216\u660e\u663e\u4e0d\u5408\u7406\u3002
+4. \u5982\u679c\u6e90\u6587\u672c\u4e2d\u51fa\u73b0 [Speaker N]: ...\uff0c\u8bf7\u6309\u8bed\u4e49\u7406\u89e3\u5185\u5bb9\uff0c\u4e0d\u8981\u628a Speaker \u6807\u7b7e\u5f53\u6210\u6b63\u6587\u3002
 
-Return strict JSON:
+\u8fd4\u56de\u4e25\u683c JSON\uff0c\u952e\u56fa\u5b9a\u4e3a\uff1a
 {
   "passed": boolean,
   "estimated_accuracy": 0.0-1.0,
@@ -64,9 +62,11 @@ Return strict JSON:
   "ambiguous_owners": ["..."],
   "notes": ["..."]
 }
-Quality gate:
-- estimated_accuracy >= 0.85
-- estimated_action_recall >= 0.90
+
+\u9644\u52a0\u8981\u6c42\uff1a
+- notes \u5fc5\u987b\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u3002
+- missing_action_hints \u548c ambiguous_owners \u5fc5\u987b\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u3002
+- \u53ea\u6709\u5728 estimated_accuracy >= 0.85 \u4e14 estimated_action_recall >= 0.90 \u65f6\uff0cpassed \u624d\u80fd\u4e3a true\u3002
 """.strip()
 
 
@@ -97,16 +97,94 @@ class MeetingState(TypedDict, total=False):
     max_iterations: int
 
 
-ACTION_HINT_TOKENS = ["action", "todo", "owner", "deadline", "responsible", "follow-up", "need to", "will", "task"]
-DECISION_HINT_TOKENS = ["decision", "conclusion", "approve", "confirm", "decide"]
-RISK_HINT_TOKENS = ["risk", "block", "delay", "issue"]
-AMBIGUOUS_OWNERS = {"tbd", "unknown", "team", "someone", "to be assigned"}
+ACTION_HINT_TOKENS = [
+    "\u884c\u52a8",
+    "\u5f85\u529e",
+    "\u8d1f\u8d23",
+    "\u622a\u6b62",
+    "\u8ddf\u8fdb",
+    "\u63a8\u8fdb",
+    "\u5b8c\u6210",
+    "\u5b89\u6392",
+    "\u843d\u5b9e",
+    "\u9700\u8981",
+    "action",
+    "todo",
+    "owner",
+    "deadline",
+    "responsible",
+    "follow-up",
+    "need to",
+    "will",
+    "task",
+]
+DECISION_HINT_TOKENS = [
+    "\u51b3\u7b56",
+    "\u7ed3\u8bba",
+    "\u786e\u5b9a",
+    "\u901a\u8fc7",
+    "\u6279\u51c6",
+    "\u51b3\u5b9a",
+    "\u786e\u8ba4",
+    "decision",
+    "approve",
+    "confirm",
+]
+RISK_HINT_TOKENS = [
+    "\u98ce\u9669",
+    "\u963b\u585e",
+    "\u5ef6\u671f",
+    "\u95ee\u9898",
+    "\u74f6\u9888",
+    "\u8d44\u6e90\u4e0d\u8db3",
+    "\u51b2\u7a81",
+    "risk",
+    "delay",
+    "issue",
+    "block",
+]
+AMBIGUOUS_OWNERS = {
+    "tbd",
+    "unknown",
+    "team",
+    "someone",
+    "to be assigned",
+    "\u5f85\u5b9a",
+    "\u672a\u77e5",
+    "\u56e2\u961f",
+    "\u76f8\u5173\u4eba\u5458",
+}
+
+PLACEHOLDER_TRANSLATIONS = {
+    "tbd": "\u5f85\u5b9a",
+    "unknown": "\u5f85\u5b9a",
+    "to be determined": "\u5f85\u5b9a",
+    "to be assigned": "\u5f85\u5b9a",
+    "not specified": "\u5f85\u5b9a",
+    "unspecified": "\u5f85\u5b9a",
+    "n/a": "\u5f85\u5b9a",
+    "na": "\u5f85\u5b9a",
+    "none": "\u65e0",
+    "no risk": "\u65e0",
+    "no": "\u65e0",
+    "participants": "\u53c2\u4f1a\u4eba\u5458",
+    "all participants": "\u5168\u4f53\u53c2\u4f1a\u4eba\u5458",
+    "participant": "\u53c2\u4f1a\u4eba\u5458",
+    "team": "\u56e2\u961f",
+    "owner unknown": "\u5f85\u5b9a",
+    "immediately after meeting": "\u4f1a\u540e\u7acb\u5373",
+    "after meeting": "\u4f1a\u540e",
+    "today": "\u4eca\u5929",
+    "tomorrow": "\u660e\u5929",
+    "this week": "\u672c\u5468",
+    "next week": "\u4e0b\u5468",
+}
 
 
 def _get_zhipu_client() -> OpenAI:
-    api_key = os.getenv("ZHIPU_API_KEY", "")
+    api_key = os.getenv("ZHIPU_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("未配置 ZHIPU_API_KEY")
+        raise RuntimeError("\u7f3a\u5c11 ZHIPU_API_KEY \u914d\u7f6e")
     timeout_sec = float(os.getenv("ZHIPU_TIMEOUT_SECONDS", "40"))
     base_url = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
     return OpenAI(api_key=api_key, timeout=timeout_sec, base_url=base_url)
@@ -117,12 +195,11 @@ def _safe_json_load(text: str) -> Dict[str, Any]:
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         cleaned = cleaned.replace("json", "", 1).strip()
-    return json.loads(cleaned)
+    return json.loads(cleaned or "{}")
 
 
 @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), reraise=True)
 def _chat_json(system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-    # Zhipu API call with retry logic for timeout/transient failures.
     model = os.getenv("ZHIPU_MODEL", "glm-5")
     client = _get_zhipu_client()
     logger.info("Calling Zhipu model=%s input_chars=%s", model, len(user_prompt))
@@ -140,35 +217,131 @@ def _chat_json(system_prompt: str, user_prompt: str) -> Dict[str, Any]:
     return _safe_json_load(content)
 
 
+def _build_weekly_period(target_date: dt.date | None = None) -> str:
+    current = target_date or dt.date.today()
+    weekly_start = current - dt.timedelta(days=current.weekday())
+    weekly_end = weekly_start + dt.timedelta(days=4)
+    return f"\u5468\u62a5\u5468\u671f\uff1a{weekly_start} \u81f3 {weekly_end}"
+
+
+def _normalize_common_text(value: Any, fallback: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    lowered = text.lower()
+    if lowered in PLACEHOLDER_TRANSLATIONS:
+        return PLACEHOLDER_TRANSLATIONS[lowered]
+    return text
+
+
+def _normalize_owner(value: Any) -> str:
+    normalized = _normalize_common_text(value, "\u5f85\u5b9a")
+    return normalized or "\u5f85\u5b9a"
+
+
+def _normalize_deadline(value: Any) -> str:
+    normalized = _normalize_common_text(value, "\u5f85\u5b9a")
+    return normalized or "\u5f85\u5b9a"
+
+
+def _normalize_risk(value: Any) -> str:
+    normalized = _normalize_common_text(value, "\u65e0")
+    return normalized or "\u65e0"
+
+
+def _normalize_decision_item(item: Any) -> str:
+    if isinstance(item, dict):
+        for key in ("decision", "summary", "content", "text"):
+            if item.get(key):
+                return _normalize_common_text(item.get(key), "\u5f85\u8865\u5145\u51b3\u7b56\u9879")
+        return "\u5f85\u8865\u5145\u51b3\u7b56\u9879"
+    return _normalize_common_text(item, "\u5f85\u8865\u5145\u51b3\u7b56\u9879")
+
+
+def _normalize_risk_item(item: Any) -> str:
+    if isinstance(item, dict):
+        risk_type = _normalize_common_text(item.get("risk_type"), "\u98ce\u9669")
+        description = _normalize_common_text(item.get("description"), "\u5f85\u8865\u5145\u98ce\u9669\u8bf4\u660e")
+        return f"{risk_type}\uff1a{description}"
+    return _normalize_risk(item)
+
+
 def _match_lines(raw_text: str, keywords: List[str]) -> List[str]:
     lines = [line.strip(" -:\t") for line in raw_text.splitlines() if line.strip()]
     result: List[str] = []
     for line in lines:
-        low = line.lower()
-        if any(keyword in low for keyword in keywords):
+        lowered = line.lower()
+        if any(keyword.lower() in lowered for keyword in keywords):
             result.append(line)
     return result
 
 
 def _extract_owner(line: str) -> str:
-    pattern = r"(owner[: ]+|responsible[: ]+)([A-Za-z0-9_\- ]{1,24})"
-    match = re.search(pattern, line, re.IGNORECASE)
-    if match:
-        return match.group(2).strip()
-    return "待定"
+    speaker_match = re.match(r"\[(.+?)\]:", line.strip())
+    if speaker_match:
+        return _normalize_owner(speaker_match.group(1))
+
+    owner_patterns = [
+        r"\u8d1f\u8d23\u4eba[\uff1a: ]*([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24})",
+        r"\u7531([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24})\u8d1f\u8d23",
+        r"([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24})\u8d1f\u8d23",
+        r"owner[: ]+([A-Za-z0-9_\- ]{1,24})",
+        r"responsible[: ]+([A-Za-z0-9_\- ]{1,24})",
+    ]
+    for pattern in owner_patterns:
+        match = re.search(pattern, line, re.IGNORECASE)
+        if match:
+            return _normalize_owner(match.group(1))
+    return "\u5f85\u5b9a"
 
 
 def _extract_deadline(line: str) -> str:
-    match = re.search(r"(20\d{2}[-/]\d{1,2}[-/]\d{1,2})", line)
-    return match.group(1) if match else "待定"
+    date_match = re.search(r"(20\d{2}[-/]\d{1,2}[-/]\d{1,2})", line)
+    if date_match:
+        return date_match.group(1).replace("/", "-")
+
+    keyword_map = {
+        "\u4eca\u5929": "\u4eca\u5929",
+        "\u660e\u5929": "\u660e\u5929",
+        "\u672c\u5468": "\u672c\u5468",
+        "\u4e0b\u5468": "\u4e0b\u5468",
+        "today": "\u4eca\u5929",
+        "tomorrow": "\u660e\u5929",
+        "this week": "\u672c\u5468",
+        "next week": "\u4e0b\u5468",
+        "immediately": "\u4f1a\u540e\u7acb\u5373",
+    }
+    lowered = line.lower()
+    for key, value in keyword_map.items():
+        if key.lower() in lowered:
+            return value
+    return "\u5f85\u5b9a"
+
+
+def _normalize_actions(actions: Any) -> List[Dict[str, str]]:
+    normalized: List[Dict[str, str]] = []
+    if not isinstance(actions, list):
+        return normalized
+
+    for item in actions:
+        if not isinstance(item, dict):
+            continue
+        task = _normalize_common_text(item.get("task"), "\u5f85\u8865\u5145\u884c\u52a8\u9879")
+        normalized.append(
+            {
+                "task": task or "\u5f85\u8865\u5145\u884c\u52a8\u9879",
+                "owner": _normalize_owner(item.get("owner")),
+                "deadline": _normalize_deadline(item.get("deadline")),
+                "risk": _normalize_risk(item.get("risk")),
+            }
+        )
+    return normalized
 
 
 def _fallback_extraction(state: MeetingState, reason: str) -> Dict[str, Any]:
-    logger.warning("触发规则兜底提取: %s", reason)
+    logger.warning("\u7ed3\u6784\u5316\u63d0\u53d6\u56de\u9000\u5230\u89c4\u5219\u903b\u8f91: %s", reason)
     raw_text = state.get("raw_text", "").strip()
     today = dt.date.today()
-    weekly_start = today - dt.timedelta(days=today.weekday())
-    weekly_end = weekly_start + dt.timedelta(days=4)
     iteration = state.get("iteration", 0)
 
     decisions = _match_lines(raw_text, DECISION_HINT_TOKENS)
@@ -182,7 +355,7 @@ def _fallback_extraction(state: MeetingState, reason: str) -> Dict[str, Any]:
                 "task": line[:120],
                 "owner": _extract_owner(line),
                 "deadline": _extract_deadline(line),
-                "risk": "无",
+                "risk": "\u65e0",
             }
         )
 
@@ -195,23 +368,23 @@ def _fallback_extraction(state: MeetingState, reason: str) -> Dict[str, Any]:
                         "task": clean[:120],
                         "owner": _extract_owner(clean),
                         "deadline": _extract_deadline(clean),
-                        "risk": "none",
+                        "risk": "\u65e0",
                     }
                 )
                 if len(actions) >= 3:
                     break
 
     if not decisions:
-        decisions = ["待人工确认：未识别到明确的决策项。"]
+        decisions = ["\u672c\u6b21\u4f1a\u8bae\u6682\u65e0\u53ef\u660e\u786e\u63d0\u53d6\u7684\u51b3\u7b56\u9879\uff0c\u8bf7\u4eba\u5de5\u8865\u5145\u786e\u8ba4\u3002"]
     if not actions:
-        actions = [{"task": "待人工补充行动项", "owner": "待定", "deadline": "待定", "risk": "无"}]
+        actions = [{"task": "\u8bf7\u4eba\u5de5\u8865\u5145\u672c\u6b21\u4f1a\u8bae\u884c\u52a8\u9879", "owner": "\u5f85\u5b9a", "deadline": "\u5f85\u5b9a", "risk": "\u65e0"}]
     if not risks:
-        risks = ["原始文本中未识别到明确风险项。"]
+        risks = ["\u672c\u6b21\u4f1a\u8bae\u672a\u8bc6\u522b\u5230\u660e\u786e\u98ce\u9669\u9879\uff0c\u5982\u6709\u9690\u60a3\u8bf7\u4eba\u5de5\u8865\u5145\u3002"]
 
     return {
-        "title": "会议结构化提取结果",
+        "title": "\u4f1a\u8bae\u7eaa\u8981\u7ed3\u6784\u5316\u7ed3\u679c",
         "date": str(today),
-        "weekly_period": f"周期：{weekly_start} 至 {weekly_end}",
+        "weekly_period": _build_weekly_period(today),
         "decisions": decisions[:10],
         "actions": actions[:20],
         "risks": risks[:10],
@@ -219,7 +392,7 @@ def _fallback_extraction(state: MeetingState, reason: str) -> Dict[str, Any]:
 
 
 def _fallback_reflection(state: MeetingState, reason: str) -> Dict[str, Any]:
-    logger.warning("触发规则兜底校验: %s", reason)
+    logger.warning("\u8d28\u68c0\u6821\u9a8c\u56de\u9000\u5230\u89c4\u5219\u903b\u8f91: %s", reason)
     raw_text = state.get("raw_text", "")
     actions = state.get("actions", [])
     iteration = state.get("iteration", 0) + 1
@@ -232,11 +405,11 @@ def _fallback_reflection(state: MeetingState, reason: str) -> Dict[str, Any]:
     for action in actions:
         owner = str(action.get("owner", "")).strip().lower()
         if not owner or owner in AMBIGUOUS_OWNERS:
-            ambiguous_owners.append(action.get("task", "未知任务"))
+            ambiguous_owners.append(_normalize_common_text(action.get("task"), "\u672a\u547d\u540d\u884c\u52a8\u9879"))
 
     owner_penalty = min(0.20, len(ambiguous_owners) * 0.03)
-    detail_penalty = 0.08 if any(action.get("deadline", "待定") == "待定" for action in actions) else 0.0
-    estimated_accuracy = max(0.0, min(1.0, 0.95 - owner_penalty - detail_penalty))
+    deadline_penalty = 0.08 if any(str(action.get("deadline", "\u5f85\u5b9a")).strip() == "\u5f85\u5b9a" for action in actions) else 0.0
+    estimated_accuracy = max(0.0, min(1.0, 0.95 - owner_penalty - deadline_penalty))
     passed = recall >= 0.90 and estimated_accuracy >= 0.85
 
     missing_hints: List[str] = []
@@ -244,12 +417,12 @@ def _fallback_reflection(state: MeetingState, reason: str) -> Dict[str, Any]:
         missing_hints.extend(candidate_lines[len(actions) : len(actions) + 6])
 
     notes = [
-        f"兜底校验原因：{reason}",
-        f"准确率目标 >= 0.85，当前估计值 {estimated_accuracy:.2f}",
-        f"召回率目标 >= 0.90，当前估计值 {recall:.2f}",
+        f"\u6821\u9a8c\u91c7\u7528\u89c4\u5219\u515c\u5e95\uff0c\u539f\u56e0\uff1a{reason}",
+        f"\u4f30\u8ba1\u51c6\u786e\u7387\uff1a{estimated_accuracy:.2f}\uff0c\u76ee\u6807\u9608\u503c\uff1a0.85",
+        f"\u4f30\u8ba1\u884c\u52a8\u9879\u53ec\u56de\u7387\uff1a{recall:.2f}\uff0c\u76ee\u6807\u9608\u503c\uff1a0.90",
     ]
     if ambiguous_owners:
-        notes.append("存在负责人不明确的行动项，建议在下一轮抽取中补充。")
+        notes.append("\u5b58\u5728\u8d1f\u8d23\u4eba\u4e0d\u660e\u786e\u7684\u884c\u52a8\u9879\uff0c\u5efa\u8bae\u4eba\u5de5\u8865\u5145\u8d23\u4efb\u4eba\u3002")
 
     return {
         "iteration": iteration,
@@ -265,37 +438,15 @@ def _fallback_reflection(state: MeetingState, reason: str) -> Dict[str, Any]:
     }
 
 
-def _normalize_actions(actions: Any) -> List[Dict[str, str]]:
-    normalized: List[Dict[str, str]] = []
-    if not isinstance(actions, list):
-        return normalized
-    for item in actions:
-        if not isinstance(item, dict):
-            continue
-        normalized.append(
-            {
-                "task": str(item.get("task", "")).strip() or "待人工补充行动项",
-                "owner": str(item.get("owner", "待定")).strip() or "待定",
-                "deadline": str(item.get("deadline", "待定")).strip() or "待定",
-                "risk": str(item.get("risk", "无")).strip() or "无",
-            }
-        )
-    return normalized
-
-
 def extraction_node(state: MeetingState) -> Dict[str, Any]:
-    # LLM extraction node with retry; fallback to heuristic extraction on failure.
     raw_text = state.get("raw_text", "").strip()
     if not raw_text:
         return _fallback_extraction(state, reason="empty_input")
 
     today = dt.date.today()
-    weekly_start = today - dt.timedelta(days=today.weekday())
-    weekly_end = weekly_start + dt.timedelta(days=4)
     iteration = state.get("iteration", 0)
-
-    # Keep inputs bounded for robustness on very long transcript.
     raw_text_for_llm = raw_text[:24000]
+
     hints: List[str] = []
     if iteration > 0:
         prior_validation = state.get("validation", {})
@@ -305,39 +456,44 @@ def extraction_node(state: MeetingState) -> Dict[str, Any]:
 
     extraction_prompt = state.get("extraction_prompt", EXTRACTION_SYSTEM_PROMPT)
     user_prompt = (
-        "Extract meeting structure and return JSON with keys: "
-        "title,date,weekly_period,decisions,actions,risks.\n"
-        "actions must be list of {task, owner, deadline, risk}.\n"
-        f"Iteration: {iteration}\n"
-        f"Reflection hints: {json.dumps(hints, ensure_ascii=True)}\n"
-        f"Source transcript:\n{raw_text_for_llm}"
+        "\u8bf7\u62bd\u53d6\u4f1a\u8bae\u7ed3\u6784\u5316\u4fe1\u606f\uff0c\u5e76\u4e25\u683c\u8fd4\u56de JSON\u3002\n"
+        "JSON \u952e\u56fa\u5b9a\u4e3a\uff1atitle\u3001date\u3001weekly_period\u3001decisions\u3001actions\u3001risks\u3002\n"
+        "\u5176\u4e2d actions \u5fc5\u987b\u662f {task, owner, deadline, risk} \u7684\u6570\u7ec4\u3002\n"
+        f"\u5f53\u524d\u8fed\u4ee3\u8f6e\u6b21\uff1a{iteration}\n"
+        f"\u4e0a\u4e00\u8f6e\u8d28\u68c0\u63d0\u793a\uff1a{json.dumps(hints, ensure_ascii=False)}\n"
+        "\u8bf7\u6ce8\u610f\uff1a\u65e0\u8bba\u539f\u6587\u662f\u4ec0\u4e48\u8bed\u8a00\uff0c\u6700\u7ec8\u8f93\u51fa\u5fc5\u987b\u4e3a\u7b80\u4f53\u4e2d\u6587\u3002\n"
+        f"\u539f\u59cb\u4f1a\u8bae\u5185\u5bb9\u5982\u4e0b\uff1a\n{raw_text_for_llm}"
     )
 
     try:
         payload = _chat_json(extraction_prompt, user_prompt)
-        decisions = payload.get("decisions", [])
-        risks = payload.get("risks", [])
+        decisions_raw = payload.get("decisions", [])
+        risks_raw = payload.get("risks", [])
         actions = _normalize_actions(payload.get("actions", []))
 
-        if not isinstance(decisions, list):
-            decisions = []
-        if not isinstance(risks, list):
-            risks = []
+        decisions: List[str] = []
+        if isinstance(decisions_raw, list):
+            decisions = [_normalize_decision_item(item) for item in decisions_raw][:10]
 
-        decisions = [str(x).strip() for x in decisions if str(x).strip()][:10]
-        risks = [str(x).strip() for x in risks if str(x).strip()][:10]
+        risks: List[str] = []
+        if isinstance(risks_raw, list):
+            risks = [_normalize_risk_item(item) for item in risks_raw][:10]
 
         if not decisions:
-            decisions = ["待人工确认：未识别到明确的决策项。"]
+            decisions = ["\u672c\u6b21\u4f1a\u8bae\u6682\u65e0\u53ef\u660e\u786e\u63d0\u53d6\u7684\u51b3\u7b56\u9879\uff0c\u8bf7\u4eba\u5de5\u8865\u5145\u786e\u8ba4\u3002"]
         if not actions:
-            actions = [{"task": "待人工补充行动项", "owner": "待定", "deadline": "待定", "risk": "无"}]
+            actions = [{"task": "\u8bf7\u4eba\u5de5\u8865\u5145\u672c\u6b21\u4f1a\u8bae\u884c\u52a8\u9879", "owner": "\u5f85\u5b9a", "deadline": "\u5f85\u5b9a", "risk": "\u65e0"}]
         if not risks:
-            risks = ["原始文本中未识别到明确风险项。"]
+            risks = ["\u672c\u6b21\u4f1a\u8bae\u672a\u8bc6\u522b\u5230\u660e\u786e\u98ce\u9669\u9879\uff0c\u5982\u6709\u9690\u60a3\u8bf7\u4eba\u5de5\u8865\u5145\u3002"]
+
+        title = _normalize_common_text(payload.get("title"), "\u4f1a\u8bae\u7eaa\u8981\u7ed3\u6784\u5316\u7ed3\u679c")
+        date_text = _normalize_common_text(payload.get("date"), str(today))
+        weekly_period = _normalize_common_text(payload.get("weekly_period"), _build_weekly_period(today))
 
         return {
-            "title": str(payload.get("title", "会议结构化提取结果")),
-            "date": str(payload.get("date", today)),
-            "weekly_period": str(payload.get("weekly_period", f"周期：{weekly_start} 至 {weekly_end}")),
+            "title": title or "\u4f1a\u8bae\u7eaa\u8981\u7ed3\u6784\u5316\u7ed3\u679c",
+            "date": date_text or str(today),
+            "weekly_period": weekly_period or _build_weekly_period(today),
             "decisions": decisions,
             "actions": actions[:20],
             "risks": risks,
@@ -348,7 +504,6 @@ def extraction_node(state: MeetingState) -> Dict[str, Any]:
 
 
 def reflection_node(state: MeetingState) -> Dict[str, Any]:
-    # LLM reflection node with retry; fallback to heuristic validation on failure.
     raw_text = state.get("raw_text", "").strip()
     extracted_payload = {
         "title": state.get("title", ""),
@@ -365,10 +520,11 @@ def reflection_node(state: MeetingState) -> Dict[str, Any]:
 
     reflection_prompt = state.get("reflection_prompt", REFLECTION_SYSTEM_PROMPT)
     user_prompt = (
-        "Validate extraction quality against source transcript.\n"
-        "Return JSON only.\n"
-        f"Source transcript:\n{raw_text[:24000]}\n\n"
-        f"Extracted JSON:\n{json.dumps(extracted_payload, ensure_ascii=True)}"
+        "\u8bf7\u6821\u9a8c\u7ed3\u6784\u5316\u63d0\u53d6\u8d28\u91cf\uff0c\u5e76\u4e25\u683c\u8fd4\u56de JSON\u3002\n"
+        "\u8bf7\u91cd\u70b9\u5173\u6ce8\u9057\u6f0f\u884c\u52a8\u9879\u3001\u8d1f\u8d23\u4eba\u662f\u5426\u660e\u786e\u3001\u622a\u6b62\u65e5\u671f\u662f\u5426\u5b8c\u6574\u3002\n"
+        "notes\u3001missing_action_hints\u3001ambiguous_owners \u90fd\u5fc5\u987b\u8f93\u51fa\u4e2d\u6587\u3002\n"
+        f"\u539f\u59cb\u4f1a\u8bae\u5185\u5bb9\uff1a\n{raw_text[:24000]}\n\n"
+        f"\u7ed3\u6784\u5316\u7ed3\u679c\uff1a\n{json.dumps(extracted_payload, ensure_ascii=False)}"
     )
 
     try:
@@ -383,12 +539,11 @@ def reflection_node(state: MeetingState) -> Dict[str, Any]:
         ambiguous = [str(x).strip() for x in ambiguous_raw if str(x).strip()] if isinstance(ambiguous_raw, list) else []
         notes = [str(x).strip() for x in notes_raw if str(x).strip()] if isinstance(notes_raw, list) else []
 
-        # Keep acceptance threshold check deterministic in code.
         gate_pass = estimated_accuracy >= 0.85 and estimated_recall >= 0.90
         llm_pass = bool(payload.get("passed", False))
         passed = gate_pass and llm_pass
 
-        notes.append(f"阈值检查：规则门禁={gate_pass}，模型判定={llm_pass}")
+        notes.append(f"\u4ee3\u7801\u9608\u503c\u5224\u5b9a\uff1a{gate_pass}\uff1b\u6a21\u578b\u5224\u5b9a\uff1a{llm_pass}")
 
         return {
             "iteration": iteration,
@@ -418,56 +573,72 @@ def _route_after_reflection(state: MeetingState) -> str:
 
 def render_report_markdown(state: MeetingState) -> str:
     report_type = state.get("report_type", "management")
-    title = state.get("title", "会议报告")
-    date = state.get("date", "")
-    weekly_period = state.get("weekly_period", "")
-    decisions = state.get("decisions", [])
-    actions = state.get("actions", [])
-    risks = state.get("risks", [])
+    title = _normalize_common_text(state.get("title"), "\u4f1a\u8bae\u7eaa\u8981")
+    date_text = _normalize_common_text(state.get("date"), "\u5f85\u5b9a")
+    weekly_period = _normalize_common_text(state.get("weekly_period"), _build_weekly_period())
+    decisions = [_normalize_decision_item(item) for item in state.get("decisions", [])]
+    actions = _normalize_actions(state.get("actions", []))
+    risks = [_normalize_risk_item(item) for item in state.get("risks", [])]
     validation = state.get("validation", {})
 
     if report_type == "project":
         lines = [
             f"# {title}",
             "",
-            f"- 日期：{date}",
+            f"- \u65e5\u671f\uff1a{date_text}",
             f"- {weekly_period}",
             "",
-            "## 决策项",
+            "## \u51b3\u7b56\u9879",
         ]
-        lines.extend([f"- {item}" for item in decisions])
+        lines.extend([f"- {item}" for item in decisions] or ["- \u6682\u65e0"])
         lines.append("")
-        lines.append("## 行动时间线")
-        lines.extend([f"- {a.get('task')} | 负责人：{a.get('owner')} | 截止日期：{a.get('deadline')}" for a in actions])
+        lines.append("## \u884c\u52a8\u9879")
+        if actions:
+            lines.extend(
+                [
+                    f"- {a.get('task')} | \u8d1f\u8d23\u4eba\uff1a{a.get('owner')} | \u622a\u6b62\u65e5\u671f\uff1a{a.get('deadline')} | \u98ce\u9669\uff1a{a.get('risk')}"
+                    for a in actions
+                ]
+            )
+        else:
+            lines.append("- \u6682\u65e0")
         lines.append("")
-        lines.append("## 风险项")
-        lines.extend([f"- {item}" for item in risks])
+        lines.append("## \u98ce\u9669\u9879")
+        lines.extend([f"- {item}" for item in risks] or ["- \u6682\u65e0"])
     else:
         lines = [
-            "# 管理版周报",
+            "# \u9879\u76ee\u7ba1\u7406\u5468\u62a5",
             "",
-            f"**来源会议：** {title}",
-            f"**日期：** {date}",
+            f"**\u4f1a\u8bae\u4e3b\u9898\uff1a** {title}",
+            f"**\u65e5\u671f\uff1a** {date_text}",
             f"**{weekly_period}**",
             "",
-            "## 关键决策",
+            "## \u6838\u5fc3\u7ed3\u8bba\u4e0e\u51b3\u7b56",
         ]
-        lines.extend([f"- {item}" for item in decisions])
+        lines.extend([f"- {item}" for item in decisions] or ["- \u6682\u65e0"])
         lines.append("")
-        lines.append("## 行动项与进展")
-        lines.extend([f"- {a.get('task')}（负责人：{a.get('owner')}，截止日期：{a.get('deadline')}）" for a in actions])
+        lines.append("## \u5f85\u529e\u4efb\u52a1\u4e0e\u8fdb\u5ea6")
+        if actions:
+            lines.extend(
+                [
+                    f"- {a.get('task')}\uff1b\u8d1f\u8d23\u4eba\uff1a{a.get('owner')}\uff1b\u622a\u6b62\u65e5\u671f\uff1a{a.get('deadline')}\uff1b\u98ce\u9669\uff1a{a.get('risk')}"
+                    for a in actions
+                ]
+            )
+        else:
+            lines.append("- \u6682\u65e0")
         lines.append("")
-        lines.append("## 风险与预警")
-        lines.extend([f"- {item}" for item in risks])
+        lines.append("## \u6838\u5fc3\u98ce\u9669\u4e0e\u9884\u8b66")
+        lines.extend([f"- {item}" for item in risks] or ["- \u6682\u65e0"])
 
     if validation:
         lines.extend(
             [
                 "",
-                "## 质量检查",
-                f"- 预估准确率：{validation.get('estimated_accuracy', 0)}",
-                f"- 预估行动项召回率：{validation.get('estimated_action_recall', 0)}",
-                f"- 是否通过：{validation.get('passed', False)}",
+                "## \u8d28\u91cf\u6821\u9a8c",
+                f"- \u4f30\u8ba1\u51c6\u786e\u7387\uff1a{validation.get('estimated_accuracy', 0)}",
+                f"- \u4f30\u8ba1\u884c\u52a8\u9879\u53ec\u56de\u7387\uff1a{validation.get('estimated_action_recall', 0)}",
+                f"- \u662f\u5426\u901a\u8fc7\uff1a{'\u662f' if validation.get('passed', False) else '\u5426'}",
             ]
         )
 

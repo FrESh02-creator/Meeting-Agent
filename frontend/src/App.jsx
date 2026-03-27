@@ -206,12 +206,12 @@ const formatHistoryTime = (value) => {
   return String(value).replace("T", " ").slice(0, 19);
 };
 const getReportTypeLabel = (reportType) => (reportType === "management" ? "管理版" : "项目版");
-const getHistoryTypeLabel = (item) => (item.entry_type === "audio_transcript" ? "语音转写" : "会议解析");
+const getHistoryTypeLabel = (item) => (item.entry_type === "audio_transcript" ? "语音纪要" : "会议解析");
 const getHistoryDownloadOptions = (item) => {
   if (item.entry_type === "audio_transcript") {
     return [
-      { key: "transcript-markdown", label: "语音转文本 Markdown" },
-      { key: "transcript-docx", label: "语音转文本 Word" },
+      { key: "transcript-markdown", label: "语音纪要 Markdown" },
+      { key: "transcript-docx", label: "语音纪要 Word" },
     ];
   }
   return [
@@ -232,9 +232,9 @@ const getHistoryFallbackSuffix = (downloadOption) => {
     case "project-docx":
       return "项目版.docx";
     case "transcript-markdown":
-      return "语音转文本.md";
+      return "语音纪要.md";
     case "transcript-docx":
-      return "语音转文本.docx";
+      return "语音纪要.docx";
     default:
       return "报告.md";
   }
@@ -251,11 +251,16 @@ const App = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [error, setError] = useState("");
   const [actionItems, setActionItems] = useState([]);
+  const [actionItemsError, setActionItemsError] = useState("");
+  const [isActionItemsLoading, setIsActionItemsLoading] = useState(false);
+  const [actionItemUpdatingKey, setActionItemUpdatingKey] = useState("");
+  const [actionItemDeletingKey, setActionItemDeletingKey] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const [voiceFile, setVoiceFile] = useState(null);
   const [voiceTitle, setVoiceTitle] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceMarkdown, setVoiceMarkdown] = useState("");
+  const [voiceMinutesResult, setVoiceMinutesResult] = useState(null);
   const [voiceError, setVoiceError] = useState("");
   const [voiceView, setVoiceView] = useState("transcript");
   const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
@@ -272,15 +277,56 @@ const App = () => {
   const [historyDeletingKey, setHistoryDeletingKey] = useState("");
   const [isClearingHistory, setIsClearingHistory] = useState(false);
 
-  const normalizeActionItems = (actions = []) =>
-    actions.map((action, index) => ({
-      id: index + 1,
-      task: action.task,
-      owner: formatDisplayValue(action.owner),
-      deadline: formatDisplayValue(action.deadline),
-      status: "pending",
-      priority: formatDisplayValue(action.risk, "无") !== "无" ? "high" : "medium",
-    }));
+  const normalizeActionItem = (item) => ({
+    id: item.id,
+    meeting_history_id: item.meeting_history_id ?? null,
+    title: String(item.title || "\u672a\u547d\u540d\u4f1a\u8bae").trim() || "\u672a\u547d\u540d\u4f1a\u8bae",
+    date: String(item.date || "").trim(),
+    task: String(item.task || "").trim(),
+    owner: formatDisplayValue(item.owner),
+    deadline: formatDisplayValue(item.deadline),
+    risk: formatDisplayValue(item.risk, "\u65e0"),
+    status: item.status === "completed" ? "completed" : "pending",
+    created_at: item.created_at || "",
+    updated_at: item.updated_at || "",
+  });
+
+  const parseDeadlineDate = (value) => {
+    const raw = String(value || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+    const parsed = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  };
+
+  const getActionDisplayStatus = (item) => {
+    if (item.status === "completed") return "completed";
+    const deadlineDate = parseDeadlineDate(item.deadline);
+    if (!deadlineDate) return "pending";
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return deadlineDate < todayStart ? "overdue" : "pending";
+  };
+
+  const fetchActionItems = useCallback(async () => {
+    setIsActionItemsLoading(true);
+    setActionItemsError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/action-items`);
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "\u52a0\u8f7d\u884c\u52a8\u9879\u5931\u8d25");
+        throw new Error(message || "\u52a0\u8f7d\u884c\u52a8\u9879\u5931\u8d25");
+      }
+
+      const payload = await response.json();
+      setActionItems(Array.isArray(payload) ? payload.map(normalizeActionItem) : []);
+    } catch (requestError) {
+      setActionItemsError(requestError.message || "\u52a0\u8f7d\u884c\u52a8\u9879\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+    } finally {
+      setIsActionItemsLoading(false);
+    }
+  }, []);
 
   const fetchHistory = useCallback(async () => {
     setIsHistoryLoading(true);
@@ -302,8 +348,8 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    void fetchHistory();
-  }, [fetchHistory]);
+    void Promise.all([fetchHistory(), fetchActionItems()]);
+  }, [fetchActionItems, fetchHistory]);
 
   const handleFileButtonClick = () => fileInputRef.current?.click();
   const handleAudioFileButtonClick = () => audioInputRef.current?.click();
@@ -333,6 +379,7 @@ const App = () => {
     setVoiceTitle(file.name.replace(/\.[^.]+$/, ""));
     setVoiceTranscript("");
     setVoiceMarkdown("");
+    setVoiceMinutesResult(null);
     setVoiceView("transcript");
   };
 
@@ -365,9 +412,8 @@ const App = () => {
 
       const payload = await response.json();
       setExtractedData(payload);
-      setActionItems((prev) => [...normalizeActionItems(payload.actions), ...prev].slice(0, 12));
       setHistoryMenuId(null);
-      void fetchHistory();
+      await Promise.all([fetchHistory(), fetchActionItems()]);
     } catch (requestError) {
       setError(requestError.message || "服务异常，请稍后重试");
     } finally {
@@ -390,6 +436,7 @@ const App = () => {
       })),
       risks: extractedData.risks || [],
       report_type: reportType,
+      source_text: extractedData.source_text || inputText || "",
     };
   };
 
@@ -429,11 +476,57 @@ const App = () => {
     }
   };
   const buildVoicePayload = () => {
-    if (!voiceTranscript.trim()) return null;
+    if (!voiceTranscript.trim() || !voiceMinutesResult) return null;
     return {
-      title: voiceTitle || voiceFile?.name?.replace(/\.[^.]+$/, "") || "会议语音转写",
+      title: voiceMinutesResult.title || voiceTitle || voiceFile?.name?.replace(/\.[^.]+$/, "") || "\u8bed\u97f3\u7eaa\u8981",
       transcript_text: voiceTranscript,
+      date: voiceMinutesResult.date || "",
+      weekly_period: voiceMinutesResult.weekly_period || "",
+      decisions: voiceMinutesResult.decisions || [],
+      actions: voiceMinutesResult.actions || [],
+      risks: voiceMinutesResult.risks || [],
+      report_type: voiceMinutesResult.report_type || "project",
     };
+  };
+
+  const finalizeVoiceMinutes = async ({ title, transcriptText }) => {
+    setIsSavingSpeakerNames(true);
+    setVoiceError("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/audio/finalize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          transcript_text: transcriptText,
+          report_type: "project",
+        }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "\u751f\u6210\u8bed\u97f3\u7eaa\u8981\u5931\u8d25");
+        throw new Error(message || "\u751f\u6210\u8bed\u97f3\u7eaa\u8981\u5931\u8d25");
+      }
+
+      const payload = await response.json();
+      setVoiceTitle(payload.title || title);
+      setVoiceTranscript(transcriptText);
+      setVoiceMarkdown(payload.report_markdown || payload.markdown || "");
+      setVoiceMinutesResult(payload);
+      setVoiceView("minutes");
+      setPendingVoiceResult(null);
+      setSpeakerNameDrafts({});
+      setIsSpeakerBindingOpen(false);
+      await Promise.all([fetchHistory(), fetchActionItems()]);
+      return payload;
+    } catch (requestError) {
+      setVoiceError(requestError.message || "\u751f\u6210\u8bed\u97f3\u7eaa\u8981\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+      return null;
+    } finally {
+      setIsSavingSpeakerNames(false);
+    }
   };
 
   const handleVoiceTranscribe = async () => {
@@ -467,20 +560,21 @@ const App = () => {
       setVoiceTitle(transcriptTitle);
       setVoiceTranscript("");
       setVoiceMarkdown("");
+      setVoiceMinutesResult(null);
       setVoiceView("transcript");
 
       if (speakerProfiles.length === 0) {
         setPendingVoiceResult(null);
         setSpeakerNameDrafts({});
         setIsSpeakerBindingOpen(false);
-        setVoiceTranscript(transcriptText);
-        setVoiceMarkdown(buildTranscriptMarkdown(transcriptTitle, transcriptText));
-        await fetchHistory();
+        await finalizeVoiceMinutes({
+          title: transcriptTitle,
+          transcriptText,
+        });
       } else {
         setPendingVoiceResult({
           title: transcriptTitle,
           transcriptText,
-          historyId: payload.history_id ?? null,
         });
         setSpeakerNameDrafts(
           Object.fromEntries(speakerProfiles.map((profile) => [profile.speaker, ""]))
@@ -497,7 +591,7 @@ const App = () => {
   const handleVoiceDownload = async (type) => {
     const payload = buildVoicePayload();
     if (!payload) {
-      setVoiceError("当前没有可导出的转写内容。");
+      setVoiceError("当前没有可导出的语音纪要内容。");
       return;
     }
 
@@ -520,7 +614,7 @@ const App = () => {
       }
 
       const blob = await response.blob();
-      const fallback = buildFileName(payload.title, type === "docx" ? "转写稿.docx" : "转写稿.md");
+      const fallback = buildFileName(payload.title, type === "docx" ? "语音纪要.docx" : "语音纪要.md");
       const filename = extractDownloadFilename(response, fallback);
       downloadBlob(blob, filename);
     } catch (requestError) {
@@ -540,50 +634,17 @@ const App = () => {
   const handleConfirmSpeakerNames = async () => {
     if (!pendingVoiceResult) return;
 
-    const { historyId, title, transcriptText } = pendingVoiceResult;
+    const { title, transcriptText } = pendingVoiceResult;
     const namedTurns = parseSpeakerTranscript(transcriptText).map((turn) => ({
       ...turn,
       speaker: String(speakerNameDrafts[turn.speaker] || turn.speaker).trim() || turn.speaker,
     }));
     const namedTranscript = buildTranscriptText(namedTurns);
-    const namedMarkdown = buildTranscriptMarkdown(title, namedTranscript);
 
-    setVoiceError("");
-    setVoiceTitle(title);
-    setVoiceTranscript(namedTranscript);
-    setVoiceMarkdown(namedMarkdown);
-    setVoiceView("transcript");
-    setIsSpeakerBindingOpen(false);
-    setPendingVoiceResult(null);
-    setSpeakerNameDrafts({});
-
-    if (historyId) {
-      setIsSavingSpeakerNames(true);
-      try {
-        const response = await fetch(`${API_BASE}/api/history/${historyId}/audio-transcript`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            title,
-            transcript_text: namedTranscript,
-          }),
-        });
-        if (!response.ok) {
-          const message = await readErrorMessage(response, "同步实名转写失败");
-          throw new Error(message || "同步实名转写失败");
-        }
-      } catch (requestError) {
-        setVoiceError(
-          requestError.message || "已完成姓名绑定，但历史记录同步失败，请稍后重试"
-        );
-      } finally {
-        setIsSavingSpeakerNames(false);
-      }
-    }
-
-    await fetchHistory();
+    await finalizeVoiceMinutes({
+      title,
+      transcriptText: namedTranscript,
+    });
   };
 
   const handleHistoryDownload = async (item, downloadOption) => {
@@ -627,7 +688,7 @@ const App = () => {
       }
 
       setHistoryMenuId((current) => (current === item.id ? null : current));
-      await fetchHistory();
+      await Promise.all([fetchHistory(), fetchActionItems()]);
     } catch (requestError) {
       setHistoryError(requestError.message || "删除历史记录失败，请稍后重试");
     } finally {
@@ -654,7 +715,7 @@ const App = () => {
       }
 
       setHistoryMenuId(null);
-      await fetchHistory();
+      await Promise.all([fetchHistory(), fetchActionItems()]);
     } catch (requestError) {
       setHistoryError(requestError.message || "清空历史记录失败，请稍后重试");
     } finally {
@@ -662,7 +723,59 @@ const App = () => {
     }
   };
 
+  const handleCompleteActionItem = async (item) => {
+    if (item.status === "completed") return;
+
+    setActionItemUpdatingKey(String(item.id));
+    setActionItemsError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/action-items/${item.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "completed" }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "\u66f4\u65b0\u884c\u52a8\u9879\u72b6\u6001\u5931\u8d25");
+        throw new Error(message || "\u66f4\u65b0\u884c\u52a8\u9879\u72b6\u6001\u5931\u8d25");
+      }
+
+      await fetchActionItems();
+    } catch (requestError) {
+      setActionItemsError(requestError.message || "\u66f4\u65b0\u884c\u52a8\u9879\u72b6\u6001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+    } finally {
+      setActionItemUpdatingKey("");
+    }
+  };
+
+  const handleDeleteActionItem = async (item) => {
+    const confirmed = window.confirm(`\u786e\u8ba4\u5220\u9664\u884c\u52a8\u9879\u201c${item.task}\u201d\u5417\uff1f`);
+    if (!confirmed) return;
+
+    setActionItemDeletingKey(String(item.id));
+    setActionItemsError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/action-items/${item.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "\u5220\u9664\u884c\u52a8\u9879\u5931\u8d25");
+        throw new Error(message || "\u5220\u9664\u884c\u52a8\u9879\u5931\u8d25");
+      }
+
+      await fetchActionItems();
+    } catch (requestError) {
+      setActionItemsError(requestError.message || "\u5220\u9664\u884c\u52a8\u9879\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+    } finally {
+      setActionItemDeletingKey("");
+    }
+  };
+
   const speakerTurns = parseSpeakerTranscript(voiceTranscript);
+  const overdueActionCount = actionItems.filter((item) => getActionDisplayStatus(item) === "overdue").length;
+  const pendingActionCount = actionItems.filter((item) => getActionDisplayStatus(item) === "pending").length;
+  const completedActionCount = actionItems.filter((item) => getActionDisplayStatus(item) === "completed").length;
   const pendingSpeakerProfiles = pendingVoiceResult
     ? collectSpeakerProfiles(parseSpeakerTranscript(pendingVoiceResult.transcriptText))
     : [];
@@ -857,6 +970,89 @@ const App = () => {
     );
   };
 
+  const renderVoiceMinutesPreview = () => {
+    if (!voiceMinutesResult) {
+      return (
+        <div className="h-full min-h-[320px] flex flex-col items-center justify-center text-center text-slate-400">
+          <FileText size={42} className="mb-4 text-slate-300" />
+          <p className="text-lg font-semibold text-slate-500">完成转写与实名绑定后，这里会显示语音纪要预览</p>
+          <p className="text-sm mt-2">系统会基于转写全文自动提取决策项、行动项和风险项。</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">语音纪要预览</h3>
+          <p className="text-sm text-slate-500 mt-1">
+            {voiceMinutesResult.title || voiceTitle}
+            {voiceMinutesResult.date ? ` ? ${voiceMinutesResult.date}` : ""}
+          </p>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+          <div>
+            <h4 className="font-bold flex items-center text-blue-700 mb-3">
+              <CheckCircle2 size={18} className="mr-2" />
+            {voiceMinutesResult.date ? ` ? ${voiceMinutesResult.date}` : ""}
+            </h4>
+            <ul className="list-disc list-inside space-y-2 text-sm text-slate-700 pl-2">
+              {(voiceMinutesResult.decisions || []).length > 0 ? (
+                (voiceMinutesResult.decisions || []).map((decision, index) => (
+                  <li key={`${decision}-${index}`}>{decision}</li>
+                ))
+              ) : (
+                <li>暂无</li>
+              )}
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-bold flex items-center text-indigo-700 mb-3">
+              <Layers size={18} className="mr-2" />
+              行动项
+            </h4>
+            <div className="space-y-3">
+              {(voiceMinutesResult.actions || []).length > 0 ? (
+                (voiceMinutesResult.actions || []).map((action, index) => (
+                  <div key={`${action.task}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900">{action.task}</p>
+                    <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-500">
+                      <span>负责人：{formatDisplayValue(action.owner)}</span>
+                      <span>截止日期：{formatDisplayValue(action.deadline)}</span>
+                      {formatDisplayValue(action.risk, "无") !== "无" && (
+                        <span className="text-orange-500">风险：{formatDisplayValue(action.risk, "无")}</span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">暂无</div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold flex items-center text-red-700 mb-3">
+              <AlertCircle size={18} className="mr-2" />
+              风险项
+            </h4>
+            <ul className="list-disc list-inside space-y-2 text-sm text-slate-700 pl-2">
+              {(voiceMinutesResult.risks || []).length > 0 ? (
+                (voiceMinutesResult.risks || []).map((risk, index) => (
+                  <li key={`${risk}-${index}`}>{risk}</li>
+                ))
+              ) : (
+                <li>暂无</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const SidebarItem = ({ id, icon: Icon, label }) => (
     <button
       onClick={() => setActiveTab(id)}
@@ -883,8 +1079,8 @@ const App = () => {
 
         <nav className="flex-1 space-y-1">
           <SidebarItem id="dashboard" icon={LayoutDashboard} label="工作台" />
-          <SidebarItem id="new" icon={FileText} label="新建纪要" />
-          <SidebarItem id="voice" icon={Mic} label="会议语音" />
+          <SidebarItem id="new" icon={FileText} label={"文本纪要"} />
+          <SidebarItem id="voice" icon={Mic} label="语音纪要" />
           <SidebarItem id="tracking" icon={Clock} label="行动追踪" />
         </nav>
       </aside>
@@ -905,7 +1101,7 @@ const App = () => {
                   </div>
                   <span className="text-xs font-bold text-slate-400">已逾期</span>
                 </div>
-                <h3 className="text-3xl font-bold">{actionItems.filter((x) => x.status === "overdue").length}</h3>
+                <h3 className="text-3xl font-bold">{overdueActionCount}</h3>
                 <p className="text-sm text-slate-500 mt-1">需要立即跟进的行动项</p>
               </div>
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -915,7 +1111,7 @@ const App = () => {
                   </div>
                   <span className="text-xs font-bold text-slate-400">进行中</span>
                 </div>
-                <h3 className="text-3xl font-bold">{actionItems.filter((x) => x.status === "pending").length}</h3>
+                <h3 className="text-3xl font-bold">{pendingActionCount}</h3>
                 <p className="text-sm text-slate-500 mt-1">本周待处理事项</p>
               </div>
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -925,16 +1121,23 @@ const App = () => {
                   </div>
                   <span className="text-xs font-bold text-slate-400">已完成</span>
                 </div>
-                <h3 className="text-3xl font-bold">{actionItems.filter((x) => x.status === "completed").length}</h3>
+                <h3 className="text-3xl font-bold">{completedActionCount}</h3>
                 <p className="text-sm text-slate-500 mt-1">最近 7 天已完成事项</p>
               </div>
             </div>
+
+            {actionItemsError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {actionItemsError}
+              </div>
+            )}
+
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-visible">
               <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="font-bold text-slate-900">历史记录</h3>
-                  <p className="text-sm text-slate-500 mt-1">已保存的会议解析结果支持按 Markdown 或 Word 下载。</p>
+                  <p className="text-sm text-slate-500 mt-1">已保存的会议解析结果和语音纪要支持按 Markdown 或 Word 下载。</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
@@ -965,7 +1168,7 @@ const App = () => {
                 {isHistoryLoading && historyItems.length === 0 ? (
                   <div className="px-6 py-10 text-sm text-slate-400">正在加载历史记录...</div>
                 ) : historyItems.length === 0 ? (
-                  <div className="px-6 py-10 text-sm text-slate-400">暂无历史记录，完成一次会议解析后会自动出现在这里。</div>
+                  <div className="px-6 py-10 text-sm text-slate-400">暂无历史记录，完成一次会议解析或语音纪要生成后会自动出现在这里。</div>
                 ) : (
                   historyItems.map((item) => {
                     const entryLabel = getHistoryTypeLabel(item);
@@ -1041,7 +1244,7 @@ const App = () => {
         {activeTab === "new" && (
           <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
             <div>
-              <h2 className="text-2xl font-bold">生成会议纪要</h2>
+              <h2 className="text-2xl font-bold">{"文本纪要"}</h2>
               <p className="text-slate-500 mt-1">上方输入会议文本或上传文档，下方直接查看解析结果预览。</p>
             </div>
 
@@ -1067,7 +1270,7 @@ const App = () => {
                       <FileText size={26} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">生成会议纪要</p>
+                      <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">{"生成文本纪要"}</p>
                       <h3 className="text-xl font-bold text-slate-900 mt-1">上传文档或粘贴会议文本</h3>
                       <p className="text-sm text-slate-500 mt-2">支持 txt、md、docx 格式，解析完成后会在下方直接展示结构化预览。</p>
                       <p className="text-sm text-slate-700 mt-3">当前文件：{selectedFile ? selectedFile.name : "尚未选择会议文档"}</p>
@@ -1123,8 +1326,8 @@ const App = () => {
         {activeTab === "voice" && (
           <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
             <div>
-              <h2 className="text-2xl font-bold">会议语音</h2>
-              <p className="text-slate-500 mt-1">上传会议音频后，系统会完成语音转写，并支持 Word 与 Markdown 下载。</p>
+              <h2 className="text-2xl font-bold">语音纪要</h2>
+              <p className="text-slate-500 mt-1">上传语音文件后，系统会先完成转写，再提取语音纪要，并支持 Word 与 Markdown 下载。</p>
             </div>
 
             <div className="bg-white rounded-[28px] border border-slate-200 shadow-sm p-6 md:p-8 space-y-6">
@@ -1135,9 +1338,9 @@ const App = () => {
                       <Mic size={26} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">上传会议语音</p>
-                      <h3 className="text-xl font-bold text-slate-900 mt-1">将语音文件转换为文本</h3>
-                      <p className="text-sm text-slate-500 mt-2">支持 mp3、wav、m4a、mp4、aac、ogg、webm 格式。</p>
+                      <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">生成语音纪要</p>
+                      <h3 className="text-xl font-bold text-slate-900 mt-1">上传语音并生成纪要</h3>
+                      <p className="text-sm text-slate-500 mt-2">支持 mp3、wav、m4a、mp4、aac、ogg、webm 格式，完成实名绑定后自动生成纪要。</p>
                       <p className="text-sm text-slate-700 mt-3">当前文件：{voiceFile ? voiceFile.name : "尚未选择音频文件"}</p>
                     </div>
                   </div>
@@ -1147,7 +1350,7 @@ const App = () => {
                       onClick={handleAudioFileButtonClick}
                       className="px-5 py-3 rounded-2xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-colors"
                     >
-                      添加语音文件
+                      上传语音文件
                     </button>
                     <button
                       onClick={handleVoiceTranscribe}
@@ -1158,7 +1361,7 @@ const App = () => {
                           : "bg-blue-600 text-white hover:bg-blue-700"
                       }`}
                     >
-                      {isTranscribingVoice ? "正在转写..." : "开始转写"}
+                      {isTranscribingVoice ? "正在转写..." : "开始生成"}
                     </button>
                   </div>
                 </div>
@@ -1190,26 +1393,26 @@ const App = () => {
                       转写
                     </button>
                     <button
-                      onClick={() => setVoiceView("markdown")}
+                      onClick={() => setVoiceView("minutes")}
                       className={`pb-2 border-b-2 transition-colors ${
-                        voiceView === "markdown" ? "border-slate-900 text-slate-900" : "border-transparent text-slate-400"
+                        voiceView === "minutes" ? "border-slate-900 text-slate-900" : "border-transparent text-slate-400"
                       }`}
                     >
-                      Markdown 预览
+                      纪要预览
                     </button>
                   </div>
 
                   <div className="flex flex-wrap gap-3">
                     <button
                       onClick={() => handleVoiceDownload("docx")}
-                      disabled={!voiceTranscript || isDownloadingVoice}
+                      disabled={!voiceMinutesResult || isDownloadingVoice || isSavingSpeakerNames}
                       className="px-4 py-2 rounded-xl bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       下载 Word
                     </button>
                     <button
                       onClick={() => handleVoiceDownload("markdown")}
-                      disabled={!voiceTranscript || isDownloadingVoice}
+                      disabled={!voiceMinutesResult || isDownloadingVoice || isSavingSpeakerNames}
                       className="px-4 py-2 rounded-xl bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       下载 Markdown
@@ -1221,8 +1424,8 @@ const App = () => {
                   {!voiceTranscript ? (
                     <div className="h-full min-h-[320px] flex flex-col items-center justify-center text-center text-slate-400">
                       <Mic size={42} className="mb-4 text-slate-300" />
-                      <p className="text-lg font-semibold text-slate-500">上传音频后，这里会直接显示转写内容</p>
-                      <p className="text-sm mt-2">页面上方选择音频文件后即可开始转写。</p>
+                      <p className="text-lg font-semibold text-slate-500">上传语音后，这里会在生成完成后展示转写全文</p>
+                      <p className="text-sm mt-2">系统会先完成转写和发言人实名绑定，再展示纪要预览与下载入口。</p>
                     </div>
                   ) : voiceView === "transcript" ? (
                     <div className="space-y-6">
@@ -1247,9 +1450,7 @@ const App = () => {
                       })}
                     </div>
                   ) : (
-                    <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-700 font-mono bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                      {voiceMarkdown}
-                    </pre>
+                    renderVoiceMinutesPreview()
                   )}
                 </div>
               </div>
@@ -1264,39 +1465,92 @@ const App = () => {
           <div className="max-w-5xl mx-auto animate-slide-in-from-bottom-4">
             <div className="mb-8 flex justify-between items-center">
               <div>
-                <h2 className="text-2xl font-bold mb-1 text-slate-800">行动追踪</h2>
-                <p className="text-slate-500">这里展示从会议纪要中提取出的行动项。</p>
+                <h2 className="text-2xl font-bold mb-1 text-slate-800">{"行动追踪"}</h2>
+                <p className="text-slate-500">{"这里展示所有已保存的行动项，和工作台统计保持同步。"}</p>
               </div>
             </div>
+
+            {actionItemsError && (
+              <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {actionItemsError}
+              </div>
+            )}
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
-                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">任务</th>
-                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">负责人</th>
-                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">截止日期</th>
-                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">状态</th>
+                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">{"任务"}</th>
+                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">{"负责人"}</th>
+                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">{"截止日期"}</th>
+                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase">{"状态"}</th>
+                    <th className="py-4 px-6 text-xs font-bold text-slate-500 uppercase text-right">{"操作"}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {actionItems.length === 0 ? (
+                  {isActionItemsLoading && actionItems.length === 0 ? (
                     <tr>
-                      <td className="px-6 py-8 text-sm text-slate-400" colSpan={4}>
-                        暂无行动项，请先完成一次会议解析。
-                      </td>
+                      <td className="px-6 py-8 text-sm text-slate-400" colSpan={5}>{"正在加载行动项..."}</td>
+                    </tr>
+                  ) : actionItems.length === 0 ? (
+                    <tr>
+                      <td className="px-6 py-8 text-sm text-slate-400" colSpan={5}>{"暂无行动项，请先完成一次会议解析。"}</td>
                     </tr>
                   ) : (
-                    actionItems.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-4 px-6 text-sm font-medium">{item.task}</td>
-                        <td className="py-4 px-6 text-sm text-slate-600">{item.owner}</td>
-                        <td className="py-4 px-6 text-sm text-slate-500">{item.deadline}</td>
-                        <td className="py-4 px-6 text-sm text-slate-500">
-                          {item.status === "completed" ? "已完成" : item.status === "overdue" ? "已逾期" : "进行中"}
-                        </td>
-                      </tr>
-                    ))
+                    actionItems.map((item) => {
+                      const displayStatus = getActionDisplayStatus(item);
+                      const isCompleting = actionItemUpdatingKey === String(item.id);
+                      const isDeleting = actionItemDeletingKey === String(item.id);
+                      const isBusy = isCompleting || isDeleting;
+
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50 transition-colors align-top">
+                          <td className="py-4 px-6 text-sm font-medium text-slate-900">
+                            <div>{item.task}</div>
+                            {item.title && (
+                              <p className="mt-1 text-xs font-normal text-slate-400">{"来源："}{item.title}</p>
+                            )}
+                          </td>
+                          <td className="py-4 px-6 text-sm text-slate-600">{item.owner}</td>
+                          <td className="py-4 px-6 text-sm text-slate-500">{item.deadline}</td>
+                          <td className="py-4 px-6 text-sm text-slate-500">
+                            <span
+                              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                                displayStatus === "completed"
+                                  ? "bg-green-100 text-green-700"
+                                  : displayStatus === "overdue"
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-blue-100 text-blue-700"
+                              }`}
+                            >
+                              {displayStatus === "completed"
+                                ? "已完成"
+                                : displayStatus === "overdue"
+                                  ? "已逾期"
+                                  : "进行中"}
+                            </span>
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="flex items-center justify-end gap-3">
+                              <button
+                                onClick={() => void handleCompleteActionItem(item)}
+                                disabled={displayStatus === "completed" || isBusy}
+                                className="rounded-xl bg-green-50 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isCompleting ? "处理中..." : "完成"}
+                              </button>
+                              <button
+                                onClick={() => void handleDeleteActionItem(item)}
+                                disabled={isBusy}
+                                className="rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isDeleting ? "删除中..." : "删除"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1311,7 +1565,7 @@ const App = () => {
             <div className="px-6 py-5 border-b border-slate-100">
               <h3 className="text-xl font-bold text-slate-900">绑定发言人姓名</h3>
               <p className="text-sm text-slate-500 mt-2">
-                请先为每个 Speaker 输入真实姓名，系统会用新姓名展示转写内容和下载文档。
+                请先为每个 Speaker 输入真实姓名，系统会用新姓名生成语音纪要、展示转写内容并保存历史记录。
               </p>
             </div>
 
@@ -1356,13 +1610,13 @@ const App = () => {
             </div>
 
             <div className="px-6 py-4 border-t border-slate-100 bg-white flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-500">所有 Speaker 都需要输入姓名后才会显示转写结果。</p>
+              <p className="text-sm text-slate-500">所有 Speaker 都需要输入姓名后，系统才会生成语音纪要并展示结果。</p>
               <button
                 onClick={() => void handleConfirmSpeakerNames()}
                 disabled={!canConfirmSpeakerNames || isSavingSpeakerNames}
                 className="px-5 py-3 rounded-2xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSavingSpeakerNames ? "正在保存..." : "确认并展示转写"}
+                {isSavingSpeakerNames ? "正在生成语音纪要..." : "确认并生成语音纪要"}
               </button>
             </div>
           </div>
